@@ -83,10 +83,18 @@ def fetch_forecasts():
         return []
 
 
-def call_agent(task_type: str):
+def call_agent(task_type: str, location_filter: str | None = None):
     """Call backend agent"""
     try:
-        response = httpx.post(f"{BACKEND_URL}/api/run-agent/{task_type}", timeout=120.0)
+        params = {}
+        if location_filter and location_filter != "Все города":
+            params["location_filter"] = location_filter
+        
+        response = httpx.post(
+            f"{BACKEND_URL}/api/run-agent/{task_type}", 
+            params=params,  # ✅ Передаем параметры
+            timeout=120.0
+        )
         response.raise_for_status()
         return response.json()
     except Exception as e:
@@ -103,45 +111,7 @@ def extract_city_name(location_name: str) -> str:
 with st.sidebar:
     st.header("⚙️ Управление")
     
-    st.subheader("🤖 Агенты")
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("🔄 Данные", use_container_width=True):
-            with st.spinner("Собираем..."):
-                result = call_agent("collect_data")
-                if result.get("status") == "success":
-                    st.success("✅ Готово!")
-                    st.rerun()
-                else:
-                    st.error(result.get("message", "Ошибка"))
-    
-    with col2:
-        if st.button("📊 Анализ", use_container_width=True):
-            with st.spinner("Анализируем..."):
-                result = call_agent("analyze")
-                if result.get("status") == "success":
-                    st.info("✅ Готово!")
-                    st.rerun()
-    
-    col3, col4 = st.columns(2)
-    with col3:
-        if st.button("🔮 Прогноз", use_container_width=True):
-            with st.spinner("Прогнозируем..."):
-                result = call_agent("forecast")
-                if result.get("status") == "success":
-                    st.info("✅ Готово!")
-    
-    with col4:
-        if st.button("🚨 Алерты", use_container_width=True):
-            with st.spinner("Проверяем..."):
-                result = call_agent("check_alerts")
-                if result.get("status") == "success":
-                    st.info("✅ Готово!")
-    
-    st.divider()
-    
-    # Фильтры
+    # ✅ СНАЧАЛА ФИЛЬТРЫ (переместили выше!)
     st.subheader("🔍 Фильтры")
     
     # Получаем список городов
@@ -172,6 +142,45 @@ with st.sidebar:
     show_co = st.checkbox("CO", value=False)
     show_temp = st.checkbox("Температура", value=True)
     show_aqi = st.checkbox("AQI", value=True)
+    
+    st.divider()
+    
+    # ✅ ПОТОМ АГЕНТЫ (теперь selected_city уже определен!)
+    st.subheader("🤖 Агенты")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("🔄 Данные", use_container_width=True):
+            with st.spinner("Собираем..."):
+                result = call_agent("collect_data")
+                if result.get("status") == "success":
+                    st.success("✅ Готово!")
+                    st.rerun()
+                else:
+                    st.error(result.get("message", "Ошибка"))
+    
+    with col2:
+        if st.button("📊 Анализ", use_container_width=True):
+            with st.spinner("Анализируем..."):
+                result = call_agent("analyze", location_filter=selected_city)  # ✅ Теперь работает!
+                if result.get("status") == "success":
+                    st.info("✅ Готово!")
+                    st.rerun()
+    
+    col3, col4 = st.columns(2)
+    with col3:
+        if st.button("🔮 Прогноз", use_container_width=True):
+            with st.spinner("Прогнозируем..."):
+                result = call_agent("forecast")
+                if result.get("status") == "success":
+                    st.info("✅ Готово!")
+    
+    with col4:
+        if st.button("🚨 Алерты", use_container_width=True):
+            with st.spinner("Проверяем..."):
+                result = call_agent("check_alerts")
+                if result.get("status") == "success":
+                    st.info("✅ Готово!")
 
 # Получаем данные с учетом фильтра города
 if selected_city != "Все города":
@@ -433,87 +442,117 @@ with tab4:
     # Получаем анализы
     try:
         response = httpx.get(f"{BACKEND_URL}/api/data/analyses", params={"hours": 168}, timeout=30.0)
+        response.raise_for_status()
         analyses = response.json()
         
-        if selected_city != "Все города":
-            analyses = [a for a in analyses if extract_city_name(a.get("location_name", "")) == selected_city]
-        
-        if analyses:
-            # Группируем по времени создания (последний анализ)
-            latest_analyses = {}
-            for a in analyses:
-                loc = a.get("location_name")
-                if loc not in latest_analyses:
-                    latest_analyses[loc] = a
-            
-            # Показываем детальный анализ от LLM
-            if latest_analyses:
-                first_analysis = list(latest_analyses.values())[0]
-                
-                st.markdown("---")
-                st.subheader("🤖 Экспертный анализ от AI")
-                
-                # Краткое резюме в highlight
-                st.success(f"**📝 Резюме:** {first_analysis.get('summary', 'N/A')}")
-                
-                # Детальный анализ в красивом блоке
-                detailed = first_analysis.get('detailed_analysis', 'Детальный анализ недоступен.')
-                st.markdown(f"""
-                <div style='background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
-                            padding: 20px; 
-                            border-radius: 10px; 
-                            color: white; 
-                            margin: 20px 0'>
-                    <h3 style='color: white; margin-top: 0'>💬 Мнение AI-эксперта</h3>
-                </div>
-                """, unsafe_allow_html=True)
-                
-                st.markdown(detailed)
-                
-                st.markdown("---")
-            
-            # Таблица результатов
-            st.subheader("📊 Детальные результаты по локациям")
-            
-            analysis_df = pd.DataFrame([
-                {
-                    "Локация": a.get("location_name"),
-                    "Тренд PM2.5": a.get("pm25_trend", "N/A"),
-                    "Средний PM2.5": f"{a.get('pm25_avg', 0):.1f}",
-                    "Аномалии": a.get("anomalies_count", 0),
-                    "Дата анализа": pd.to_datetime(a.get("created_at")).strftime("%d.%m.%Y %H:%M") if a.get("created_at") else "N/A"
-                }
-                for a in latest_analyses.values()
-            ])
-            
-            st.dataframe(analysis_df, use_container_width=True)
-            
-            # Визуализация
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                trend_counts = analysis_df['Тренд PM2.5'].value_counts()
-                fig_trends = go.Figure(data=[go.Pie(
-                    labels=trend_counts.index,
-                    values=trend_counts.values,
-                    hole=0.3
-                )])
-                fig_trends.update_layout(title="Распределение трендов")
-                st.plotly_chart(fig_trends, use_container_width=True)
-            
-            with col2:
-                top_anomalies = analysis_df.nlargest(5, 'Аномалии')
-                fig_anomalies = go.Figure(data=[go.Bar(
-                    x=top_anomalies['Локация'],
-                    y=top_anomalies['Аномалии'],
-                    marker_color='indianred'
-                )])
-                fig_anomalies.update_layout(title="Топ-5 локаций по аномалиям")
-                st.plotly_chart(fig_anomalies, use_container_width=True)
-        else:
+        # ✅ Отладка: проверяем тип данных
+        if not isinstance(analyses, list):
+            st.error(f"⚠️ Неожиданный формат данных: {type(analyses)}")
+            st.json(analyses)
+        elif len(analyses) == 0:
             st.warning("⚠️ Нет результатов анализа. Нажмите '📊 Анализ' в боковой панели.")
+        else:
+            # Фильтруем по городу
+            if selected_city != "Все города":
+                analyses = [
+                    a for a in analyses 
+                    if isinstance(a, dict) and extract_city_name(a.get("location_name", "")) == selected_city
+                ]
+            
+            if not analyses:
+                st.warning(f"⚠️ Нет данных анализа для города **{selected_city}**. Запустите анализ заново.")
+            else:
+                # Группируем по времени создания (последний анализ)
+                latest_analyses = {}
+                for a in analyses:
+                    if isinstance(a, dict):  # ✅ Проверка типа
+                        loc = a.get("location_name")
+                        if loc and loc not in latest_analyses:
+                            latest_analyses[loc] = a
+                
+                if not latest_analyses:
+                    st.warning("⚠️ Не удалось обработать результаты анализа.")
+                else:
+                    # Показываем детальный анализ от LLM
+                    first_analysis = list(latest_analyses.values())[0]
+                    
+                    st.markdown("---")
+                    st.subheader("🤖 Экспертный анализ от AI")
+                    
+                    # Краткое резюме
+                    summary = first_analysis.get('summary', 'N/A')
+                    st.success(f"**📝 Резюме:** {summary}")
+                    
+                    # Детальный анализ
+                    detailed = first_analysis.get('detailed_analysis', 'Детальный анализ недоступен.')
+                    st.markdown(f"""
+                    <div style='background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                                padding: 20px; 
+                                border-radius: 10px; 
+                                color: white; 
+                                margin: 20px 0'>
+                        <h3 style='color: white; margin-top: 0'>💬 Мнение AI-эксперта</h3>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                    st.markdown(detailed)
+                    
+                    st.markdown("---")
+                    
+                    # Таблица результатов
+                    st.subheader("📊 Детальные результаты по локациям")
+                    
+                    try:
+                        analysis_df = pd.DataFrame([
+                            {
+                                "Локация": a.get("location_name", "N/A"),
+                                "Тренд PM2.5": a.get("pm25_trend", "N/A"),
+                                "Средний PM2.5": f"{a.get('pm25_avg', 0):.1f}",
+                                "Аномалии": a.get("anomalies_count", 0),
+                                "Дата анализа": pd.to_datetime(a.get("created_at")).strftime("%d.%m.%Y %H:%M") if a.get("created_at") else "N/A"
+                            }
+                            for a in latest_analyses.values()
+                            if isinstance(a, dict)
+                        ])
+                        
+                        st.dataframe(analysis_df, use_container_width=True)
+                        
+                        # Визуализация
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            if 'Тренд PM2.5' in analysis_df.columns:
+                                trend_counts = analysis_df['Тренд PM2.5'].value_counts()
+                                fig_trends = go.Figure(data=[go.Pie(
+                                    labels=trend_counts.index,
+                                    values=trend_counts.values,
+                                    hole=0.3
+                                )])
+                                fig_trends.update_layout(title="Распределение трендов")
+                                st.plotly_chart(fig_trends, use_container_width=True)
+                        
+                        with col2:
+                            if 'Аномалии' in analysis_df.columns and len(analysis_df) > 0:
+                                top_anomalies = analysis_df.nlargest(min(5, len(analysis_df)), 'Аномалии')
+                                fig_anomalies = go.Figure(data=[go.Bar(
+                                    x=top_anomalies['Локация'],
+                                    y=top_anomalies['Аномалии'],
+                                    marker_color='indianred'
+                                )])
+                                fig_anomalies.update_layout(title="Топ-5 локаций по аномалиям")
+                                st.plotly_chart(fig_anomalies, use_container_width=True)
+                    
+                    except Exception as e:
+                        st.error(f"Ошибка визуализации: {e}")
+                        # Показываем сырые данные для отладки
+                        with st.expander("🔍 Отладка: сырые данные"):
+                            st.json(list(latest_analyses.values())[:3])
+    
+    except httpx.HTTPStatusError as e:
+        st.error(f"Ошибка HTTP {e.response.status_code}: {e.response.text}")
     except Exception as e:
         st.error(f"Ошибка загрузки анализов: {e}")
+        logger.error(f"Analysis tab error: {e}", exc_info=True)
 
 # Tab 5: Chat
 with tab5:

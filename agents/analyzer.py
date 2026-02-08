@@ -28,6 +28,10 @@ class AnalyzerAgent:
         """Выполнение анализа данных"""
         logger.info(f"{self.name}: Starting analysis")
         
+        # ✅ Получаем фильтр по городу из state
+        location_filter = state.get("data", {}).get("location_filter")
+        logger.info(f"Location filter: {location_filter}")
+        
         analysis_results = []
         period_end = datetime.utcnow()
         period_start = period_end - timedelta(hours=168)
@@ -39,6 +43,17 @@ class AnalyzerAgent:
         if not measurements:
             message = AIMessage(content="⚠️ No data available for analysis")
             return {"messages": state["messages"] + [message], "data": {}}
+        
+        # ✅ Фильтруем измерения по городу, если фильтр задан
+        if location_filter and location_filter != "Все города":
+            measurements = [
+                m for m in measurements 
+                if m.location_name.startswith(location_filter)
+            ]
+            
+            if not measurements:
+                message = AIMessage(content=f"⚠️ No data for {location_filter}")
+                return {"messages": state["messages"] + [message], "data": {}}
         
         # Группируем по локациям
         locations_data = {}
@@ -74,18 +89,42 @@ class AnalyzerAgent:
                 "avg_temp": avg_temp,
             })
         
-        # Генерируем детальный отчет для каждой локации
+        # Генерируем детальный отчет
         analysis_text = "\n".join([
             f"📍 {r['location']}:\n"
             f"   - Тренд: {r['pm25_trend']}\n"
             f"   - PM2.5: среднее={r['avg_pm25']:.1f}, мин={r['min_pm25']:.1f}, макс={r['max_pm25']:.1f}\n"
             f"   - Аномалий: {r['pm25_anomalies_count']}\n"
             f"   - Средняя температура: {r['avg_temp']:.1f}°C"
-            for r in analysis_results[:10]  # Берем первые 10 для контекста
+            for r in analysis_results[:10]
         ])
         
-        # Расширенный промпт для LLM
-        detailed_prompt = f"""Ты - эксперт-эколог, анализирующий качество воздуха в крупных городах России за последнюю неделю.
+        # ✅ Адаптируем промпт под фильтр
+        if location_filter and location_filter != "Все города":
+            scope_text = f"городе {location_filter}"
+            detailed_prompt = f"""Ты - эксперт-эколог. Проанализируй качество воздуха в {scope_text} за последнюю неделю.
+
+ДАННЫЕ ЗА НЕДЕЛЮ:
+{analysis_text}
+
+СПРАВКА:
+- PM2.5 норма: до 25 μg/m³ (ВОЗ), 35 μg/m³ (допустимо)
+- Тренды: increasing = ухудшение, decreasing = улучшение, stable = стабильно
+
+Напиши подробный анализ на русском (4-5 абзацев):
+
+1. **Общая оценка**: какая ситуация в {location_filter}? Где в городе лучше/хуже?
+
+2. **Тренды**: какие районы показывают ухудшение, какие улучшение?
+
+3. **Сравнение районов**: центр vs север vs юг - где лучше качество воздуха?
+
+4. **Рекомендации**: что советуешь жителям {location_filter}?
+
+Используй emoji для наглядности."""
+        else:
+            scope_text = "крупных городах России"
+            detailed_prompt = f"""Ты - эксперт-эколог, анализирующий качество воздуха в {scope_text} за последнюю неделю.
 
 ДАННЫЕ ЗА НЕДЕЛЮ:
 {analysis_text}
@@ -110,18 +149,23 @@ class AnalyzerAgent:
 
         try:
             # Краткое резюме
-            summary_prompt = f"На основе данных: {analysis_text}\n\nНапиши КРАТКОЕ резюме (1-2 предложения) общей экологической обстановки."
+            summary_prompt = f"Данные по {scope_text}: {analysis_text[:500]}\n\nНапиши КРАТКОЕ резюме (1 предложение) экологической обстановки."
+            
+            logger.info("Calling LLM for summary...")
             summary_response = await self.llm.ainvoke(summary_prompt)
             summary = summary_response.content
+            logger.info(f"Summary received: {summary[:100]}...")
             
             # Детальный анализ
+            logger.info("Calling LLM for detailed analysis...")
             detailed_response = await self.llm.ainvoke(detailed_prompt)
             detailed_analysis = detailed_response.content
+            logger.info(f"Detailed analysis received: {len(detailed_analysis)} chars")
             
         except Exception as e:
-            logger.error(f"LLM analysis error: {e}")
+            logger.error(f"LLM analysis error: {e}", exc_info=True)
             summary = "Анализ выполнен, данные собраны за неделю."
-            detailed_analysis = "Детальный анализ временно недоступен."
+            detailed_analysis = f"Детальный анализ временно недоступен. Ошибка: {str(e)}"
         
         # Сохраняем результаты в БД
         async for session in get_session():
@@ -144,9 +188,16 @@ class AnalyzerAgent:
             
             await session.commit()
         
-        message = AIMessage(content=f"📊 Анализ завершен:\n\n{summary}\n\nПодробности доступны на вкладке 'Анализ'")
+        # ✅ Добавляем информацию о фильтре в ответ
+        filter_info = f" для города {location_filter}" if location_filter and location_filter != "Все города" else ""
+        message = AIMessage(content=f"📊 Анализ{filter_info} завершен:\n\n{summary}\n\nПодробности доступны на вкладке 'Анализ'")
         
         return {
             "messages": state["messages"] + [message],
-            "data": {"analysis": analysis_results, "summary": summary, "detailed_analysis": detailed_analysis}
+            "data": {
+                "analysis": analysis_results, 
+                "summary": summary, 
+                "detailed_analysis": detailed_analysis,
+                "location_filter": location_filter  # ✅ Возвращаем фильтр
+            }
         }

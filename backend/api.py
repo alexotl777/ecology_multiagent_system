@@ -67,38 +67,35 @@ class AlertOut(BaseModel):
         from_attributes = True
 
 
-@router.post("/run-agent/{task_type}", response_model=AgentResponse)
-async def run_agent(task_type: str):
-    """Execute agent task"""
-    valid_tasks = ["collect_data", "analyze", "forecast", "check_alerts"]
+@router.get("/data/analyses")
+async def get_analyses(
+    hours: int = 168,
+    session: AsyncSession = Depends(get_session)
+):
+    """Get recent analyses"""
+    from db.models import Analysis
     
-    if task_type not in valid_tasks:
-        raise HTTPException(400, f"Invalid task. Must be one of: {valid_tasks}")
+    cutoff = datetime.utcnow() - timedelta(hours=hours)
+    query = select(Analysis).where(
+        Analysis.created_at >= cutoff
+    ).order_by(Analysis.created_at.desc()).limit(100)
     
-    try:
-        logger.info(f"Running agent task: {task_type}")
-        
-        # Запускаем граф
-        result = await agent_graph.ainvoke({
-            "messages": [HumanMessage(content=f"Execute {task_type}")],
-            "task_type": task_type,
-            "next_agent": "",
-            "data": {}
-        })
-        
-        # Извлекаем результат
-        last_message = result["messages"][-1] if result["messages"] else None
-        response_message = last_message.content if last_message else "Task completed"
-        
-        return AgentResponse(
-            status="success",
-            message=response_message,
-            data=result.get("data", {})
-        )
+    result = await session.execute(query)
+    analyses = result.scalars().all()
     
-    except Exception as e:
-        logger.error(f"Agent execution error: {e}", exc_info=True)
-        raise HTTPException(500, f"Agent execution failed: {str(e)}")
+    return [
+        {
+            "id": a.id,
+            "location_name": a.location_name,
+            "pm25_trend": a.pm25_trend,
+            "pm25_avg": a.pm25_avg,
+            "anomalies_count": a.anomalies_count,
+            "summary": a.summary,
+            "detailed_analysis": a.detailed_analysis,
+            "created_at": a.created_at.isoformat()
+        }
+        for a in analyses
+    ]
 
 
 @router.get("/data/measurements", response_model=List[MeasurementOut])
@@ -151,33 +148,42 @@ async def get_alerts(
     return alerts
 
 
-@router.get("/data/analyses")
-async def get_analyses(
-    hours: int = 168,
-    session: AsyncSession = Depends(get_session)
+@router.post("/run-agent/{task_type}", response_model=AgentResponse)
+async def run_agent(
+    task_type: str,
+    location_filter: Optional[str] = None  # ✅ НОВЫЙ параметр
 ):
-    """Get recent analyses"""
-    cutoff = datetime.utcnow() - timedelta(hours=hours)
-    query = select(Analysis).where(
-        Analysis.created_at >= cutoff
-    ).order_by(Analysis.created_at.desc()).limit(100)
+    """Execute agent task"""
+    valid_tasks = ["collect_data", "analyze", "forecast", "check_alerts"]
     
-    result = await session.execute(query)
-    analyses = result.scalars().all()
+    if task_type not in valid_tasks:
+        raise HTTPException(400, f"Invalid task. Must be one of: {valid_tasks}")
     
-    return [
-        {
-            "id": a.id,
-            "location_name": a.location_name,
-            "pm25_trend": a.pm25_trend,
-            "pm25_avg": a.pm25_avg,
-            "anomalies_count": a.anomalies_count,
-            "summary": a.summary,
-            "detailed_analysis": a.detailed_analysis,
-            "created_at": a.created_at.isoformat()
-        }
-        for a in analyses
-    ]
+    try:
+        logger.info(f"Running agent task: {task_type} with location_filter: {location_filter}")
+        
+        # Запускаем граф
+        result = await agent_graph.ainvoke({
+            "messages": [HumanMessage(content=f"Execute {task_type}")],
+            "task_type": task_type,
+            "next_agent": "",
+            "data": {"location_filter": location_filter} 
+        })
+        
+        # Извлекаем результат
+        last_message = result["messages"][-1] if result["messages"] else None
+        response_message = last_message.content if last_message else "Task completed"
+        
+        return AgentResponse(
+            status="success",
+            message=response_message,
+            data=result.get("data", {})
+        )
+    
+    except Exception as e:
+        logger.error(f"Agent execution error: {e}", exc_info=True)
+        raise HTTPException(500, f"Agent execution failed: {str(e)}")
+
 
 
 @router.get("/data/current")

@@ -22,10 +22,10 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = Field(default="INFO")
     
     # GROQ Model
-    GROQ_MODEL: str = Field(default="llama3-8b-8192")
+    GROQ_MODEL: str = Field(default="llama-3.3-70b-versatile")
     
-    # ✅ Крупнейшие города России (ClassVar = не поле модели)
-    MAJOR_CITIES: ClassVar[List[Dict[str, Any]]] = [
+    # ✅ Крупнейшие города России
+    MAJOR_CITIES_RUSSIA: ClassVar[List[Dict[str, Any]]] = [
         {"name": "Москва", "lat": 55.7558, "lon": 37.6176},
         {"name": "Санкт-Петербург", "lat": 59.9311, "lon": 30.3609},
         {"name": "Новосибирск", "lat": 55.0084, "lon": 82.9357},
@@ -38,10 +38,25 @@ class Settings(BaseSettings):
         {"name": "Ростов-на-Дону", "lat": 47.2357, "lon": 39.7015},
     ]
     
-    # ✅ Генерируем точки мониторинга
+    # ✅ Крупнейшие города Индии
+    MAJOR_CITIES_INDIA: ClassVar[List[Dict[str, Any]]] = [
+        {"name": "Дели", "lat": 28.6139, "lon": 77.2090},
+        {"name": "Мумбаи", "lat": 19.0760, "lon": 72.8777},
+        {"name": "Калькутта", "lat": 22.5726, "lon": 88.3639},
+        {"name": "Бангалор", "lat": 12.9716, "lon": 77.5946},
+        {"name": "Ченнаи", "lat": 13.0827, "lon": 80.2707},
+        {"name": "Хайдарабад", "lat": 17.3850, "lon": 78.4867},
+        {"name": "Ахмадабад", "lat": 23.0225, "lon": 72.5714},
+        {"name": "Пуна", "lat": 18.5204, "lon": 73.8567},
+    ]
+    
+    # ✅ Объединяем все города
+    MAJOR_CITIES: ClassVar[List[Dict[str, Any]]] = MAJOR_CITIES_RUSSIA + MAJOR_CITIES_INDIA
+    
+    # Генерируем точки мониторинга
     MONITORING_LOCATIONS: ClassVar[List[Dict[str, Any]]] = []
     
-    # ✅ AQI пороги
+    # AQI пороги
     AQI_THRESHOLDS: ClassVar[Dict[str, int]] = {
         "good": 50,
         "moderate": 100,
@@ -51,7 +66,7 @@ class Settings(BaseSettings):
     }
 
 
-# ✅ Генерируем точки после определения класса
+# Генерируем точки после определения класса
 for city in Settings.MAJOR_CITIES:
     Settings.MONITORING_LOCATIONS.extend([
         {"name": f"{city['name']} (Центр)", "lat": city["lat"], "lon": city["lon"]},
@@ -62,4 +77,6 @@ for city in Settings.MAJOR_CITIES:
 # Создаем инстанс
 settings = Settings()
 
-print(f"🌍 Инициализировано {len(settings.MONITORING_LOCATIONS)} точек мониторинга в {len(settings.MAJOR_CITIES)} городах")
+print(f"🌍 Инициализировано {len(settings.MONITORING_LOCATIONS)} точек мониторинга")
+print(f"   - Россия: {len(settings.MAJOR_CITIES_RUSSIA)} городов")
+print(f"   - Индия: {len(settings.MAJOR_CITIES_INDIA)} городов")
