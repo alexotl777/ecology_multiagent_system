@@ -10,7 +10,7 @@ from pydantic import BaseModel
 
 from agents.graph import agent_graph
 from db.database import get_session
-from db.models import Measurement, Forecast, Alert
+from db.models import Measurement, Forecast, Alert, Analysis
 from langchain_core.messages import HumanMessage
 
 logger = logging.getLogger(__name__)
@@ -149,6 +149,35 @@ async def get_alerts(
     alerts = result.scalars().all()
     
     return alerts
+
+
+@router.get("/data/analyses")
+async def get_analyses(
+    hours: int = 168,
+    session: AsyncSession = Depends(get_session)
+):
+    """Get recent analyses"""
+    cutoff = datetime.utcnow() - timedelta(hours=hours)
+    query = select(Analysis).where(
+        Analysis.created_at >= cutoff
+    ).order_by(Analysis.created_at.desc()).limit(100)
+    
+    result = await session.execute(query)
+    analyses = result.scalars().all()
+    
+    return [
+        {
+            "id": a.id,
+            "location_name": a.location_name,
+            "pm25_trend": a.pm25_trend,
+            "pm25_avg": a.pm25_avg,
+            "anomalies_count": a.anomalies_count,
+            "summary": a.summary,
+            "detailed_analysis": a.detailed_analysis,
+            "created_at": a.created_at.isoformat()
+        }
+        for a in analyses
+    ]
 
 
 @router.get("/data/current")

@@ -1,6 +1,6 @@
 """SQLAlchemy ORM модели"""
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, Text, Index
+from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, Text, Index, UniqueConstraint
 from db.database import Base
 
 
@@ -69,3 +69,27 @@ class Alert(Base):
     is_active = Column(Boolean, default=True, index=True)
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
     resolved_at = Column(DateTime, nullable=True)
+
+
+class Analysis(Base):
+    """Результаты анализа данных"""
+    __tablename__ = "analyses"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    analysis_type = Column(String(50), nullable=False)
+    location_name = Column(String(100), nullable=False, index=True)
+    
+    # Результаты
+    pm25_trend = Column(String(20))
+    pm25_avg = Column(Float)
+    anomalies_count = Column(Integer, default=0)
+    summary = Column(Text)  
+    detailed_analysis = Column(Text) 
+    
+    period_start = Column(DateTime, nullable=False)
+    period_end = Column(DateTime, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    
+    __table_args__ = (
+        UniqueConstraint('location_name', 'created_at', name='unique_analysis'),
+    )

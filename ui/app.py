@@ -122,6 +122,7 @@ with st.sidebar:
                 result = call_agent("analyze")
                 if result.get("status") == "success":
                     st.info("✅ Готово!")
+                    st.rerun()
     
     col3, col4 = st.columns(2)
     with col3:
@@ -140,7 +141,7 @@ with st.sidebar:
     
     st.divider()
     
-    # ✅ Фильтры
+    # Фильтры
     st.subheader("🔍 Фильтры")
     
     # Получаем список городов
@@ -162,7 +163,7 @@ with st.sidebar:
     hours_map = {"1 час": 1, "6 часов": 6, "24 часа": 24, "7 дней": 168}
     selected_hours = hours_map[time_range]
     
-    # ✅ Выбор показателей для графиков
+    # Выбор показателей для графиков
     st.subheader("📈 Показатели")
     show_pm25 = st.checkbox("PM2.5", value=True)
     show_pm10 = st.checkbox("PM10", value=True)
@@ -179,7 +180,7 @@ else:
     measurements = fetch_measurements(hours=selected_hours)
 
 # Main content
-tab1, tab2, tab3, tab4, tab5 = st.tabs(["🗺️ Карта", "📈 Графики", "📊 Статистика", "💬 Чат", "📋 Данные"])
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["🗺️ Карта", "📈 Графики", "📊 Статистика", "🔬 Анализ", "💬 Чат", "📋 Данные"])
 
 # Tab 1: Map
 with tab1:
@@ -203,10 +204,10 @@ with tab1:
         with col1:
             st.metric("📍 Локаций", len(unique_locations))
         with col2:
-            avg_pm25 = sum([m.get("pm25", 0) for m in unique_locations.values() if m.get("pm25")]) / len(unique_locations)
+            avg_pm25 = sum([m.get("pm25", 0) for m in unique_locations.values() if m.get("pm25")]) / len(unique_locations) if unique_locations else 0
             st.metric("🌫️ Средний PM2.5", f"{avg_pm25:.1f} μg/m³")
         with col3:
-            avg_aqi = sum([calculate_aqi(m.get("pm25", 0)) for m in unique_locations.values() if m.get("pm25")]) / len(unique_locations)
+            avg_aqi = sum([calculate_aqi(m.get("pm25", 0)) for m in unique_locations.values() if m.get("pm25")]) / len(unique_locations) if unique_locations else 0
             st.metric("📊 Средний AQI", f"{int(avg_aqi)}")
         with col4:
             cities_count = len(set([extract_city_name(loc) for loc in unique_locations.keys()]))
@@ -314,7 +315,7 @@ with tab2:
         
         st.write(f"📊 Загружено записей: **{len(df)}**")
         
-        # ✅ PM2.5 и PM10
+        # PM2.5 и PM10
         if show_pm25 or show_pm10:
             fig = go.Figure()
             
@@ -351,7 +352,7 @@ with tab2:
             )
             st.plotly_chart(fig, use_container_width=True)
         
-        # ✅ NO2, O3, CO
+        # NO2, O3, CO
         if show_no2 or show_o3 or show_co:
             fig2 = go.Figure()
             
@@ -376,7 +377,7 @@ with tab2:
             fig2.update_layout(title="Загрязняющие вещества (μg/m³)", xaxis_title="Время", yaxis_title="Концентрация", hovermode='x unified', height=400)
             st.plotly_chart(fig2, use_container_width=True)
         
-        # ✅ Температура и AQI
+        # Температура и AQI
         col1, col2 = st.columns(2)
         
         with col1:
@@ -422,9 +423,100 @@ with tab3:
     else:
         st.info("Нет данных")
 
-# Tab 4: Chat
-# Tab 4: Chat
-with tab4:  # ✅ Было tab3, должно быть tab4!
+# Tab 4: Analysis Results
+with tab4:
+    st.header("🔬 Результаты анализа")
+    
+    if selected_city != "Все города":
+        st.info(f"🔍 Фильтр: **{selected_city}**")
+    
+    # Получаем анализы
+    try:
+        response = httpx.get(f"{BACKEND_URL}/api/data/analyses", params={"hours": 168}, timeout=30.0)
+        analyses = response.json()
+        
+        if selected_city != "Все города":
+            analyses = [a for a in analyses if extract_city_name(a.get("location_name", "")) == selected_city]
+        
+        if analyses:
+            # Группируем по времени создания (последний анализ)
+            latest_analyses = {}
+            for a in analyses:
+                loc = a.get("location_name")
+                if loc not in latest_analyses:
+                    latest_analyses[loc] = a
+            
+            # Показываем детальный анализ от LLM
+            if latest_analyses:
+                first_analysis = list(latest_analyses.values())[0]
+                
+                st.markdown("---")
+                st.subheader("🤖 Экспертный анализ от AI")
+                
+                # Краткое резюме в highlight
+                st.success(f"**📝 Резюме:** {first_analysis.get('summary', 'N/A')}")
+                
+                # Детальный анализ в красивом блоке
+                detailed = first_analysis.get('detailed_analysis', 'Детальный анализ недоступен.')
+                st.markdown(f"""
+                <div style='background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                            padding: 20px; 
+                            border-radius: 10px; 
+                            color: white; 
+                            margin: 20px 0'>
+                    <h3 style='color: white; margin-top: 0'>💬 Мнение AI-эксперта</h3>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                st.markdown(detailed)
+                
+                st.markdown("---")
+            
+            # Таблица результатов
+            st.subheader("📊 Детальные результаты по локациям")
+            
+            analysis_df = pd.DataFrame([
+                {
+                    "Локация": a.get("location_name"),
+                    "Тренд PM2.5": a.get("pm25_trend", "N/A"),
+                    "Средний PM2.5": f"{a.get('pm25_avg', 0):.1f}",
+                    "Аномалии": a.get("anomalies_count", 0),
+                    "Дата анализа": pd.to_datetime(a.get("created_at")).strftime("%d.%m.%Y %H:%M") if a.get("created_at") else "N/A"
+                }
+                for a in latest_analyses.values()
+            ])
+            
+            st.dataframe(analysis_df, use_container_width=True)
+            
+            # Визуализация
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                trend_counts = analysis_df['Тренд PM2.5'].value_counts()
+                fig_trends = go.Figure(data=[go.Pie(
+                    labels=trend_counts.index,
+                    values=trend_counts.values,
+                    hole=0.3
+                )])
+                fig_trends.update_layout(title="Распределение трендов")
+                st.plotly_chart(fig_trends, use_container_width=True)
+            
+            with col2:
+                top_anomalies = analysis_df.nlargest(5, 'Аномалии')
+                fig_anomalies = go.Figure(data=[go.Bar(
+                    x=top_anomalies['Локация'],
+                    y=top_anomalies['Аномалии'],
+                    marker_color='indianred'
+                )])
+                fig_anomalies.update_layout(title="Топ-5 локаций по аномалиям")
+                st.plotly_chart(fig_anomalies, use_container_width=True)
+        else:
+            st.warning("⚠️ Нет результатов анализа. Нажмите '📊 Анализ' в боковой панели.")
+    except Exception as e:
+        st.error(f"Ошибка загрузки анализов: {e}")
+
+# Tab 5: Chat
+with tab5:
     st.header("💬 Чат с агентами")
     
     if "messages" not in st.session_state:
@@ -457,9 +549,8 @@ with tab4:  # ✅ Было tab3, должно быть tab4!
                 st.markdown(response)
                 st.session_state.messages.append({"role": "assistant", "content": response})
 
-
-# Tab 5: Data tables
-with tab5:
+# Tab 6: Data tables
+with tab6:
     st.header("📋 Данные")
     
     if selected_city != "Все города":
